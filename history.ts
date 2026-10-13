@@ -84,12 +84,51 @@ function normalizeUserContent(value: unknown): { parts: Record<string, unknown>[
   return { parts, images };
 }
 
+// Codex desktop renders these directives as cards; BB shows them as raw text, so they become Markdown.
+const DIRECTIVE = /(::?)([a-z][a-z0-9-]*)\{((?:"(?:[^"\\]|\\.)*"|[^}"])*)\}/g;
+const ATTRIBUTE = /([A-Za-z][\w-]*)=(?:"((?:[^"\\]|\\.)*)"|([^\s}]+))/g;
+
+function folder(path: string | undefined): string {
+  return `\`${path?.split(/[\\/]/).filter(Boolean).at(-1) ?? "repository"}\``;
+}
+
+function quote(text: string): string {
+  return text.split("\n").map((line) => `> ${line}`).join("\n");
+}
+
+export function renderCodexDirectives(text: string): string {
+  return text.replace(DIRECTIVE, (source, colons: string, name: string, body: string) => {
+    const a: Record<string, string> = {};
+    for (const match of body.matchAll(ATTRIBUTE)) a[match[1]!] = match[2] !== undefined ? match[2].replace(/\\(.)/g, "$1") : match[3]!;
+    if (colons === ":") {
+      if (name !== "codex-file-citation" || !a.path) return source;
+      return `[${a.path.split(/[\\/]/).at(-1)}](<${a.path}>)`;
+    }
+    switch (name) {
+      case "git-stage": return `_Staged changes in ${folder(a.cwd)}_`;
+      case "git-commit": return `_Committed in ${folder(a.cwd)}_`;
+      case "git-create-branch": return `_Created branch \`${a.branch ?? ""}\` in ${folder(a.cwd)}_`;
+      case "git-push": return a.branch ? `_Pushed \`${a.branch}\` from ${folder(a.cwd)}_` : `_Pushed from ${folder(a.cwd)}_`;
+      case "git-create-pr": return a.url ? `_Opened ${a.isDraft === "true" ? "draft " : ""}pull request:_ ${a.url}` : source;
+      case "created-thread": return a.threadId ? `_Started thread \`${a.threadId}\`_` : "_Started a new thread_";
+      case "inbox-item": return a.title ? `**${a.title}**${a.summary ? ` — ${a.summary}` : ""}` : source;
+      case "code-comment": {
+        if (!a.title) return source;
+        const lines = a.start ? `:${a.start}${a.end && a.end !== a.start ? `-${a.end}` : ""}` : "";
+        return quote([`**${a.title}**`, ...(a.body ? ["", a.body] : []), ...(a.file ? ["", `\`${a.file}${lines}\``] : [])].join("\n"));
+      }
+      case "codex-inline-vis": return a.file ? `_Visualization: \`${a.file}\`_` : source;
+      default: return source;
+    }
+  });
+}
+
 function normalizeItem(item: Record<string, unknown>): Record<string, unknown> {
   const kind = string(item.type);
   const id = string(item.id, newId("legacy_item"));
-  if (kind === "agentMessage") return { type: kind, id, text: string(item.text) };
+  if (kind === "agentMessage") return { type: kind, id, text: renderCodexDirectives(string(item.text)) };
   if (kind === "reasoning") return { type: kind, id, summary: array(item.summary), content: [] };
-  if (kind === "plan") return { type: kind, id, text: string(item.text) };
+  if (kind === "plan") return { type: kind, id, text: renderCodexDirectives(string(item.text)) };
   if (kind === "contextCompaction") return { type: kind, id };
   if (kind === "imageView") return { type: kind, id, path: string(item.path) };
   if (kind === "webSearch") {

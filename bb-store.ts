@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import Database from "better-sqlite3";
 import type { History, ImportEvent } from "./history.js";
-import { newId } from "./history.js";
+import { newId, renderCodexDirectives } from "./history.js";
 import { formatTitle, type TitleMode } from "./titles.js";
 import type { SourceThread } from "./source.js";
 
@@ -169,6 +169,16 @@ export class BbStore {
       delete data.item.error;
       return [{ id: row.id, data: JSON.stringify(data) }];
     });
+    const messages = this.db.prepare("SELECT id,sequence,data FROM events WHERE thread_id=? AND type='item/completed' AND item_kind IN ('agentMessage','plan')")
+      .all(existing.threadId) as { id: string; sequence: number; data: string }[];
+    const textFixes = messages.flatMap((row) => {
+      const data = JSON.parse(row.data) as { item?: { text?: unknown } };
+      if (!data.item || typeof data.item.text !== "string") return [];
+      const text = renderCodexDirectives(data.item.text);
+      if (text === data.item.text) return [];
+      data.item.text = text;
+      return [{ id: row.id, sequence: row.sequence, data: JSON.stringify(data), text }];
+    });
     const originalTitle = source.title.trim();
     const fallbackTitle = source.fallbackTitle?.trim() ?? originalTitle;
     const nextTitle = formatTitle(source.title, titleMode, titleMaxLength);
@@ -177,9 +187,14 @@ export class BbStore {
       current.title === candidate || Array.from({ length: 171 }, (_, index) => index + 30)
         .some((length) => current.title === formatTitle(candidate, "truncate", length)));
     const retitle = Boolean(originalTitle && managedTitle && current.title !== nextTitle);
-    if (fixes.length || retitle) this.db.transaction(() => {
+    if (fixes.length || textFixes.length || retitle) this.db.transaction(() => {
       const updateEvent = this.db.prepare("UPDATE events SET data=? WHERE id=?");
       for (const fix of fixes) updateEvent.run(fix.data, fix.id);
+      const updateSegment = this.db.prepare("UPDATE thread_search_segments SET text=?,updated_at=? WHERE id=?");
+      for (const fix of textFixes) {
+        updateEvent.run(fix.data, fix.id);
+        updateSegment.run(fix.text, Date.now(), `${existing.threadId}:assistant_message:event:${fix.sequence}`);
+      }
       if (retitle) {
         this.db.prepare("UPDATE threads SET title=? WHERE id=?").run(nextTitle, existing.threadId);
         this.db.prepare(`INSERT INTO thread_search_segments(id,thread_id,source_kind,source_key,source_seq,text,created_at,updated_at)
@@ -187,7 +202,7 @@ export class BbStore {
           .run(`${existing.threadId}:title:title`, existing.threadId, "title", "title", null, originalTitle, Date.now(), Date.now());
       }
     }).immediate();
-    return { events: fixes.length, title: retitle };
+    return { events: fixes.length + textFixes.length, title: retitle };
   }
 }
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { convertHistory } from "./.tmp-test/history.js";
+import { convertHistory, renderCodexDirectives } from "./.tmp-test/history.js";
 import { formatTitle } from "./.tmp-test/titles.js";
 
 test("tool calls without an error use the BB event schema", () => {
@@ -25,4 +25,17 @@ test("last activity comes from real turn times only", () => {
   const turn = (id, startedAt, completedAt) => ({ id, startedAt, completedAt, items: [{ type: "userMessage", id: `${id}_user`, content: [{ type: "text", text: "Hi" }] }] });
   assert.equal(convertHistory({ id: "source_1", turns: [turn("a", 10, 12), turn("b", 20, null)] }, meta).lastActivityAt, 20000);
   assert.equal(convertHistory({ id: "source_1", turns: [turn("a", null, null)] }, meta).lastActivityAt, null);
+});
+
+test("Codex directives become Markdown and unknown ones stay as written", () => {
+  assert.equal(renderCodexDirectives('See :codex-file-citation{path="/tmp/out/Отчёт 1.xlsx" purpose="output"}.'), "See [Отчёт 1.xlsx](</tmp/out/Отчёт 1.xlsx>).");
+  assert.equal(renderCodexDirectives('::git-push{cwd="/work/muesli" branch="fix"}'), "_Pushed `fix` from `muesli`_");
+  assert.equal(renderCodexDirectives('::git-create-pr{cwd="/w/r" branch="b" url="https://x/pull/1" isDraft=false}'), "_Opened pull request:_ https://x/pull/1");
+  assert.equal(renderCodexDirectives('::inbox-item{title="Done" summary="Sent \\"it\\""}'), '**Done** — Sent "it"');
+  assert.equal(
+    renderCodexDirectives('::code-comment{title="[P1] Bug" body="Line one\nline two" file="/w/a.php" start=27 end=28 priority=1}'),
+    "> **[P1] Bug**\n> \n> Line one\n> line two\n> \n> `/w/a.php:27-28`",
+  );
+  assert.equal(renderCodexDirectives('::created-thread{clientThreadId="client-new-thread:1"}'), "_Started a new thread_");
+  for (const raw of ["::future-card{x=1}", "a:hover{color:red}", "User::canEdit()"]) assert.equal(renderCodexDirectives(raw), raw);
 });
