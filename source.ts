@@ -1,9 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { join, dirname, delimiter } from "node:path";
+import { join, dirname, delimiter, sep } from "node:path";
 import Database from "better-sqlite3";
+
+// Codex desktop "Chats": threads without a project, imported as one synthetic project.
+export const PROJECTLESS_ID = "codex:projectless";
 
 export interface SourceProject {
   id: string;
@@ -230,12 +233,29 @@ export class CodexCatalog {
   projects(): SourceProject[] {
     const rows = this.db.prepare("SELECT id,name,created_at_ms FROM projects ORDER BY position,name").all() as ProjectRow[];
     const roots = this.db.prepare("SELECT path FROM project_roots WHERE project_id=? ORDER BY position");
-    return rows.map((row) => ({
+    const projects = rows.map((row) => ({
       id: row.id,
       name: row.name,
       roots: (roots.all(row.id) as { path: string }[]).map((root) => root.path),
       createdAtMs: row.created_at_ms,
     }));
+    const chats = this.projectlessRows();
+    if (chats.length === 0) return projects;
+    // Chats inside an existing project's folder route to that project; the rest go to Codex's chat folder.
+    const owners = projects.flatMap((project) => project.roots).filter((root) => chats.some((row) => row.cwd.startsWith(root + sep)));
+    return [...projects, { id: PROJECTLESS_ID, name: "Codex chats", roots: [join(homedir(), "Documents", "Codex"), ...new Set(owners)], createdAtMs: 0 }];
+  }
+
+  private projectlessRows(): ThreadRow[] {
+    const path = join(this.home, ".codex-global-state.json");
+    if (!existsSync(path)) return [];
+    const ids = (JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)["projectless-thread-ids"];
+    if (!Array.isArray(ids)) return [];
+    const byId = this.db.prepare("SELECT * FROM threads WHERE id=? AND project_id IS NULL");
+    // claude-mem observer sessions are machine-generated, not the user's chats.
+    const observer = join(homedir(), ".claude-mem") + sep;
+    return ids.flatMap((id) => (typeof id === "string" ? [byId.get(id) as ThreadRow | undefined] : []))
+      .filter((row): row is ThreadRow => row !== undefined && !row.cwd.startsWith(observer));
   }
 
   threads(project: SourceProject): SourceThread[] {
@@ -244,8 +264,9 @@ export class CodexCatalog {
     const byProject = this.db.prepare("SELECT * FROM threads WHERE project_id=?");
     const byRoot = this.db.prepare("SELECT * FROM threads WHERE cwd=?");
     const byWorktree = this.db.prepare("SELECT * FROM threads WHERE cwd LIKE ? ESCAPE '\\'");
-    for (const row of byProject.all(project.id) as ThreadRow[]) all.set(row.id, row);
-    for (const root of project.roots) {
+    if (project.id === PROJECTLESS_ID) for (const row of this.projectlessRows()) all.set(row.id, row);
+    else for (const row of byProject.all(project.id) as ThreadRow[]) all.set(row.id, row);
+    if (project.id !== PROJECTLESS_ID) for (const root of project.roots) {
       for (const row of byRoot.all(root) as ThreadRow[]) all.set(row.id, row);
       const basename = root.split(/[\\/]/).filter(Boolean).at(-1);
       if (basename) {

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { BbStore } from "./bb-store.js";
 import { attachHistory } from "./attachments.js";
 import { convertHistory, newId } from "./history.js";
-import { CodexAppServer, CodexCatalog, type SourceProject, type SourceThread } from "./source.js";
+import { CodexAppServer, CodexCatalog, PROJECTLESS_ID, type SourceProject, type SourceThread } from "./source.js";
 import { folderRoute, inside, type FolderRoute } from "./routing.js";
 import type { TitleMode } from "./titles.js";
 
@@ -145,6 +145,11 @@ function canUseLocalHistory(cause: unknown): cause is Error {
   );
 }
 
+// A plain folder owns its plain subfolders, as in Codex; only another Git repository is foreign.
+function foreignChat(root: FolderRoute, thread: FolderRoute): boolean {
+  return thread.exists && thread.targetPath !== root.targetPath && !(root.kind === "non-git" && thread.kind === "non-git");
+}
+
 function conflictFor(thread: SourceThread, project: SourceProject, targetId: string | null,
   catalog: CodexCatalog, store: BbStore, allProjects: SourceProject[], routeFor = folderRoute): z.infer<typeof conflictSchema> | null {
   const existing = store.existing(thread.id);
@@ -154,7 +159,7 @@ function conflictFor(thread: SourceThread, project: SourceProject, targetId: str
     reason: "Chat directory does not match a project root", owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), importedProjectId: existing?.projectId ?? null };
   const rootRoute = routeFor(root);
   const threadRoute = routeFor(thread.cwd);
-  if (threadRoute.exists && threadRoute.targetPath !== rootRoute.targetPath) return {
+  if (foreignChat(rootRoute, threadRoute)) return {
     sourceId: thread.id, title: thread.title, cwd: thread.cwd,
     reason: "Chat belongs to another Git repository; select its folder separately",
     owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), importedProjectId: existing?.projectId ?? null,
@@ -186,7 +191,7 @@ function rootForThread(project: SourceProject, thread: SourceThread, routeFor = 
       if (sameRepository) return sameRepository;
     }
   }
-  return matches[0] ?? null;
+  return matches[0] ?? (project.id === PROJECTLESS_ID ? project.roots[0] ?? null : null);
 }
 
 function suggestedName(projects: SourceProject[], route: FolderRoute, routeFor = folderRoute): string {
@@ -487,10 +492,7 @@ export default async function plugin(bb: BbPluginApi) {
         const matching = existingTargets.filter((candidate) => candidate.sources.some((source) => source.hostId === hostId && routeFor(source.path).key === route.targetPath));
         if (matching.length > 1) throw new Error(`Several BB projects use ${route.targetPath}; choose one before migration`);
         for (const thread of candidates) {
-          const threadRoute = routeFor(thread.cwd);
-          // A plain folder owns its plain subfolders, as in Codex; only a nested Git repository is foreign.
-          const plainSubfolder = route.kind === "non-git" && threadRoute.kind === "non-git";
-          if (threadRoute.exists && threadRoute.targetPath !== route.targetPath && !plainSubfolder) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
+          if (foreignChat(route, routeFor(thread.cwd))) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
           const existing = activeStore.existing(thread.id);
           if (existing && existing.projectId !== matching[0]?.id) throw new Error(`Chat ${thread.id} is already in another BB project: ${existing.projectId}. Resolve this before import.`);
         }

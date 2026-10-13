@@ -184,3 +184,34 @@ test("skips a verified empty placeholder with a fully projected metadata-only ro
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("lists Codex desktop chats without a project as one synthetic project", async () => {
+  const { homedir } = await import("node:os");
+  const { PROJECTLESS_ID } = await import("./.tmp-test/source.js");
+  const directory = mkdtempSync(join(tmpdir(), "bb-codex-projectless-"));
+  const db = new Database(join(directory, "state_5.sqlite"));
+  try {
+    db.exec(`CREATE TABLE projects(id TEXT,name TEXT,position INTEGER,created_at_ms INTEGER);
+      CREATE TABLE project_roots(project_id TEXT,position INTEGER,path TEXT);
+      CREATE TABLE threads(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,name TEXT,cwd TEXT,
+        archived INTEGER,archived_at INTEGER,created_at_ms INTEGER,updated_at_ms INTEGER,
+        created_at INTEGER,updated_at INTEGER,model TEXT,reasoning_effort TEXT,source TEXT)`);
+    db.prepare("INSERT INTO projects VALUES(?,?,?,?)").run("divoom", "Divoom", 0, 1);
+    db.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("divoom", 0, "/work/Divoom");
+    const insert = db.prepare("INSERT INTO threads VALUES(?,?,?,?,?,0,NULL,1000,2000,1,2,NULL,NULL,'vscode')");
+    insert.run("chat", null, "Chat", null, join(homedir(), "Documents", "Codex", "2026-06-03", "x"));
+    insert.run("nested", null, "Nested", null, "/work/Divoom/timesgate");
+    insert.run("observer", null, "Observer", null, join(homedir(), ".claude-mem", "observer-sessions"));
+    insert.run("unlisted", null, "Unlisted", null, "/elsewhere");
+    insert.run("owned", "divoom", "Owned", null, "/work/Divoom");
+    db.close();
+    writeFileSync(join(directory, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["chat", "nested", "observer", "owned"] }));
+    const catalog = new CodexCatalog(directory);
+    const chats = catalog.projects().find((project) => project.id === PROJECTLESS_ID);
+    assert.deepEqual(chats.roots, [join(homedir(), "Documents", "Codex"), "/work/Divoom"]);
+    assert.deepEqual(catalog.threads(chats).map((thread) => thread.id), ["chat", "nested"]);
+    catalog.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
