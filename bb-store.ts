@@ -95,8 +95,8 @@ export class BbStore {
     const environmentPath = insideProject ? args.projectRoot : existsSync(sourcePath) ? sourcePath : isWorktreePath ? args.projectRoot : sourcePath;
     if (!existsSync(environmentPath)) throw new Error(`Project path does not exist: ${environmentPath}`);
     const now = Date.now();
-    // Activity follows the last imported message, not Codex metadata writes.
-    const lastActivity = args.history.events.reduce((latest, event) => Math.max(latest, event.createdAt), 0) || args.source.updatedAtMs;
+    // Activity follows the last real message; Codex recency covers chats whose turn times are synthesized.
+    const lastActivity = args.history.lastActivityAt ?? args.source.updatedAtMs;
     const write = this.db.transaction(() => {
       let environmentId = (this.db.prepare(
         "SELECT id FROM environments WHERE project_id=? AND host_id=? AND path=? AND status='ready' ORDER BY created_at LIMIT 1",

@@ -25,7 +25,7 @@ function fixture(withAttachment) {
     model: "gpt-6", reasoningEffort: "medium", source: "vscode",
   };
   const history = {
-    userMessages: 1, assistantMessages: 0, images: 1,
+    userMessages: 1, assistantMessages: 0, images: 1, lastActivityAt: 110,
     events: [
       { id: "evt_1", sequence: 1, scopeKind: "thread", turnId: null, providerThreadId: "codex_thread", type: "thread/identity", itemId: null, itemKind: null, data: JSON.stringify({ providerThreadId: "codex_thread" }), createdAt: 100 },
       { id: "evt_2", sequence: 2, scopeKind: "thread", turnId: null, providerThreadId: null, type: "client/turn/requested", itemId: null, itemKind: null, data: JSON.stringify({ input: [{ type: "localImage", path: "image.png" }] }), createdAt: 110 },

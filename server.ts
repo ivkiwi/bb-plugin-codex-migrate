@@ -146,8 +146,10 @@ function canUseLocalHistory(cause: unknown): cause is Error {
 }
 
 // A plain folder owns its plain subfolders, as in Codex; only another Git repository is foreign.
-function foreignChat(root: FolderRoute, thread: FolderRoute): boolean {
-  return thread.exists && thread.targetPath !== root.targetPath && !(root.kind === "non-git" && thread.kind === "non-git");
+// A Codex chat outside every root falls back to the chats folder by design, wherever it ran.
+function foreignChat(project: SourceProject, thread: SourceThread, root: string, rootRoute: FolderRoute, threadRoute: FolderRoute): boolean {
+  if (project.id === PROJECTLESS_ID && !matchesRoot(thread, root)) return false;
+  return threadRoute.exists && threadRoute.targetPath !== rootRoute.targetPath && !(rootRoute.kind === "non-git" && threadRoute.kind === "non-git");
 }
 
 function conflictFor(thread: SourceThread, project: SourceProject, targetId: string | null,
@@ -159,7 +161,7 @@ function conflictFor(thread: SourceThread, project: SourceProject, targetId: str
     reason: "Chat directory does not match a project root", owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), importedProjectId: existing?.projectId ?? null };
   const rootRoute = routeFor(root);
   const threadRoute = routeFor(thread.cwd);
-  if (foreignChat(rootRoute, threadRoute)) return {
+  if (foreignChat(project, thread, root, rootRoute, threadRoute)) return {
     sourceId: thread.id, title: thread.title, cwd: thread.cwd,
     reason: "Chat belongs to another Git repository; select its folder separately",
     owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), importedProjectId: existing?.projectId ?? null,
@@ -446,12 +448,12 @@ export default async function plugin(bb: BbPluginApi) {
       const allowedKeys = new Set(allProjects.flatMap((project) => project.roots.map((root) => routeFor(root).key)));
       for (const key of selectedKeys) if (!allowedKeys.has(key)) throw new Error(`Unknown Codex project folder: ${key}`);
       for (const key of gitInitRoots) if (!selectedKeys.has(key) || routeFor(key).kind !== "non-git") throw new Error(`Cannot initialize Git for unselected or Git-backed folder: ${key}`);
-      // git init in a plain folder would turn a selected plain subfolder into part of that repository after it was planned on its own.
+      // git init where selected plain folders nest would move chats between them after they were planned.
       const initKeys = [...selectedKeys].filter((key) => routeFor(key).kind === "non-git" && (options.initGitAll || gitInitRoots.includes(key)));
-      for (const key of selectedKeys) {
-        if (routeFor(key).kind !== "non-git" || initKeys.includes(key)) continue;
-        const absorbing = initKeys.find((root) => root !== key && inside(key, root));
-        if (absorbing) throw new Error(`Initializing Git in ${absorbing} would absorb the selected folder ${key}; initialize Git there too or deselect it`);
+      for (const root of initKeys) for (const other of selectedKeys) {
+        if (other !== root && routeFor(other).kind === "non-git" && (inside(other, root) || inside(root, other))) {
+          throw new Error(`Initializing Git in ${root} would change which project owns chats in ${other}; import nested plain folders without git init, or one at a time`);
+        }
       }
       const activeStore = new BbStore(dataDir, true);
       store = activeStore;
@@ -495,12 +497,12 @@ export default async function plugin(bb: BbPluginApi) {
         updatedAt: new Date().toISOString(),
       };
       await updateStatus(progress);
-      for (const { root, route, candidates } of plans) {
+      for (const { root, route, project, candidates } of plans) {
         if (!route.exists || !route.targetPath) throw new Error(`Codex project path does not exist: ${root}`);
         const matching = existingTargets.filter((candidate) => candidate.sources.some((source) => source.hostId === hostId && routeFor(source.path).key === route.targetPath));
         if (matching.length > 1) throw new Error(`Several BB projects use ${route.targetPath}; choose one before migration`);
         for (const thread of candidates) {
-          if (foreignChat(route, routeFor(thread.cwd))) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
+          if (foreignChat(project, thread, root, route, routeFor(thread.cwd))) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
           const existing = activeStore.existing(thread.id);
           if (existing && existing.projectId !== matching[0]?.id) throw new Error(`Chat ${thread.id} is already in another BB project: ${existing.projectId}. Resolve this before import.`);
         }

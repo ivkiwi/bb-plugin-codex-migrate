@@ -34,6 +34,8 @@ export interface History {
   userMessages: number;
   assistantMessages: number;
   images: number;
+  /** Latest real Codex turn time; null when every turn time had to be synthesized. */
+  lastActivityAt: number | null;
 }
 
 export function newId(prefix: string): string {
@@ -138,6 +140,7 @@ export function convertHistory(raw: unknown, meta: SourceThread): History {
   let users = 0;
   let assistants = 0;
   let images = 0;
+  let lastActivityAt: number | null = null;
   const add = (type: string, data: Record<string, unknown>, createdAt: number, turnId: string | null = null, item: Record<string, unknown> | null = null) => {
     events.push({
       id: newId("evt"), sequence: ++sequence, scopeKind: turnId ? "turn" : "thread", turnId,
@@ -189,7 +192,9 @@ export function convertHistory(raw: unknown, meta: SourceThread): History {
       }
     }
     add("turn/completed", { providerThreadId: meta.id, status: status(turn.status) }, end, turnId);
+    const realTime = turn.completedAt ?? turn.startedAt;
+    if (realTime) lastActivityAt = Math.max(lastActivityAt ?? 0, Math.floor(realTime * 1000));
     previousEnd = end;
   }
-  return { events, userMessages: users, assistantMessages: assistants, images };
+  return { events, userMessages: users, assistantMessages: assistants, images, lastActivityAt };
 }

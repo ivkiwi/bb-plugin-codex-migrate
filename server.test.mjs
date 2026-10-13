@@ -587,7 +587,12 @@ test("a plain subfolder chat keeps one destination, and git init cannot absorb a
   source.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("src_plain", 0, plain);
   source.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("src_sub", 0, sub);
   source.prepare("INSERT INTO threads VALUES(?,?,?,NULL,?,0,NULL,1000,2000,1,2,NULL,NULL,'vscode')").run("chat", "src_plain", "Chat", sub);
+  const loose = join(directory, "loose-repo");
+  mkdirSync(loose);
+  execFileSync("git", ["-C", loose, "init"], { stdio: "ignore" });
+  source.prepare("INSERT INTO threads VALUES(?,?,?,NULL,?,0,NULL,1000,2000,1,2,NULL,NULL,'vscode')").run("loose", null, "Loose", loose);
   source.close();
+  writeFileSync(join(codexHome, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["loose"] }));
   const target = new Database(join(bbHome, "bb.db"));
   target.exec(`
     CREATE TABLE threads(id TEXT,project_id TEXT,environment_id TEXT,provider_id TEXT,status TEXT,archived_at INTEGER,created_at INTEGER,updated_at INTEGER,deleted_at INTEGER);
@@ -612,11 +617,17 @@ test("a plain subfolder chat keeps one destination, and git init cannot absorb a
     await plugin(bb);
     const preview = await harness.behavior.callRpc("scan", { projects: ["Plain"], all: false, includeThreads: true });
     assert.deepEqual(preview.projects[0].conflicts, []);
-    await assert.rejects(
-      harness.behavior.callRpc("apply", { projects: [], roots: [plain, sub], gitInitRoots: [plain], all: false, existingOnly: false, limit: null }),
-      /would absorb the selected folder/,
-    );
+    const chats = await harness.behavior.callRpc("scan", { projects: ["Codex chats"], all: false, includeThreads: true });
+    assert.deepEqual(chats.projects[0].conflicts, []);
+    assert.deepEqual(chats.projects[0].threads.map((thread) => thread.id), ["loose"]);
+    for (const gitInitRoots of [[plain], [sub]]) {
+      await assert.rejects(
+        harness.behavior.callRpc("apply", { projects: [], roots: [plain, sub], gitInitRoots, all: false, existingOnly: false, limit: null }),
+        /would change which project owns chats/,
+      );
+    }
     assert.equal(existsSync(join(plain, ".git")), false);
+    assert.equal(existsSync(join(sub, ".git")), false);
     await harness.lifecycle.dispose();
   } finally {
     if (prior === undefined) delete process.env.CODEX_HOME;

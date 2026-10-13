@@ -19,3 +19,10 @@ test("title truncation is configurable and keeps Unicode characters intact", () 
   assert.equal(formatTitle("  A   long\nchat title  ", "original", 30), "A   long\nchat title");
   assert.equal(formatTitle("😀".repeat(40), "truncate", 30), `${"😀".repeat(29)}…`);
 });
+
+test("last activity comes from real turn times only", () => {
+  const meta = { id: "source_1", title: "Example", cwd: "/tmp", createdAtMs: 1000, updatedAtMs: 2000 };
+  const turn = (id, startedAt, completedAt) => ({ id, startedAt, completedAt, items: [{ type: "userMessage", id: `${id}_user`, content: [{ type: "text", text: "Hi" }] }] });
+  assert.equal(convertHistory({ id: "source_1", turns: [turn("a", 10, 12), turn("b", 20, null)] }, meta).lastActivityAt, 20000);
+  assert.equal(convertHistory({ id: "source_1", turns: [turn("a", null, null)] }, meta).lastActivityAt, null);
+});
