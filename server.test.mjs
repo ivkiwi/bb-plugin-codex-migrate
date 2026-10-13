@@ -635,3 +635,58 @@ test("a plain subfolder chat keeps one destination, and git init cannot absorb a
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("a fallback chat keeps its exemption when its folder merges with a registered project", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "bb-codex-merge-")));
+  const priorHome = process.env.HOME;
+  process.env.HOME = directory;
+  const codexHome = join(directory, "codex");
+  const bbHome = join(directory, "bb");
+  const docs = join(directory, "Documents", "Codex");
+  const loose = join(directory, "loose-repo");
+  const { mkdirSync } = await import("node:fs");
+  for (const path of [codexHome, bbHome, docs, loose]) mkdirSync(path, { recursive: true });
+  execFileSync("git", ["-C", loose, "init"], { stdio: "ignore" });
+  const source = new Database(join(codexHome, "state_5.sqlite"));
+  source.exec(`
+    CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,position INTEGER NOT NULL,created_at_ms INTEGER NOT NULL);
+    CREATE TABLE project_roots(project_id TEXT NOT NULL,position INTEGER NOT NULL,path TEXT NOT NULL);
+    CREATE TABLE threads(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,name TEXT,cwd TEXT,archived INTEGER,archived_at INTEGER,created_at_ms INTEGER,updated_at_ms INTEGER,created_at INTEGER,updated_at INTEGER,model TEXT,reasoning_effort TEXT,source TEXT);
+  `);
+  source.prepare("INSERT INTO projects VALUES(?,?,?,?)").run("src_docs", "Docs", 0, 100);
+  source.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("src_docs", 0, docs);
+  source.prepare("INSERT INTO threads VALUES(?,?,?,NULL,?,0,NULL,1000,2000,1,2,NULL,NULL,'vscode')").run("loose", null, "Loose", loose);
+  source.close();
+  writeFileSync(join(codexHome, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["loose"] }));
+  const target = new Database(join(bbHome, "bb.db"));
+  target.exec(`
+    CREATE TABLE threads(id TEXT,project_id TEXT,environment_id TEXT,provider_id TEXT,status TEXT,archived_at INTEGER,created_at INTEGER,updated_at INTEGER,deleted_at INTEGER);
+    CREATE TABLE environments(id TEXT,project_id TEXT,host_id TEXT,path TEXT,status TEXT,environment_provider_id TEXT,environment_provider_selection TEXT);
+    CREATE TABLE events(id TEXT,thread_id TEXT,environment_id TEXT,scope_kind TEXT,turn_id TEXT,provider_thread_id TEXT,sequence INTEGER,type TEXT,item_kind TEXT,data TEXT,created_at INTEGER);
+    CREATE TABLE thread_search_segments(id TEXT,thread_id TEXT,source_kind TEXT,source_key TEXT,source_seq INTEGER,text TEXT,created_at INTEGER,updated_at INTEGER);
+  `);
+  target.prepare("INSERT INTO threads VALUES('thr_loose','proj_docs','env_1','codex','idle',NULL,1,2,NULL)").run();
+  target.prepare("INSERT INTO events VALUES('evt_1','thr_loose','env_1','thread',NULL,'loose',1,'thread/identity',NULL,'{}',1)").run();
+  target.close();
+  const prior = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  const { bb, harness } = createFakePluginHost({
+    pluginId: "codex-migrate",
+    dataDir: bbHome,
+    sdk: {
+      system: { config: async () => ({ primaryHostId: "host_test" }) },
+      projects: { list: async () => [{ id: "proj_docs", name: "Docs", sources: [{ id: "source_docs", hostId: "host_test", path: docs, isDefault: true }] }] },
+    },
+  });
+  try {
+    await plugin(bb);
+    const report = await harness.behavior.callRpc("apply", { projects: [], roots: [docs], all: false, existingOnly: false, limit: null });
+    assert.equal(report.projects.reduce((sum, project) => sum + project.existing, 0), 1);
+    await harness.lifecycle.dispose();
+  } finally {
+    if (prior === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prior;
+    process.env.HOME = priorHome;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

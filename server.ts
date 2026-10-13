@@ -146,10 +146,13 @@ function canUseLocalHistory(cause: unknown): cause is Error {
 }
 
 // A plain folder owns its plain subfolders, as in Codex; only another Git repository is foreign.
+function foreignChat(root: FolderRoute, thread: FolderRoute): boolean {
+  return thread.exists && thread.targetPath !== root.targetPath && !(root.kind === "non-git" && thread.kind === "non-git");
+}
+
 // A Codex chat outside every root falls back to the chats folder by design, wherever it ran.
-function foreignChat(project: SourceProject, thread: SourceThread, root: string, rootRoute: FolderRoute, threadRoute: FolderRoute): boolean {
-  if (project.id === PROJECTLESS_ID && !matchesRoot(thread, root)) return false;
-  return threadRoute.exists && threadRoute.targetPath !== rootRoute.targetPath && !(rootRoute.kind === "non-git" && threadRoute.kind === "non-git");
+function fallbackChat(project: SourceProject, thread: SourceThread, root: string): boolean {
+  return project.id === PROJECTLESS_ID && !matchesRoot(thread, root);
 }
 
 function conflictFor(thread: SourceThread, project: SourceProject, targetId: string | null,
@@ -161,7 +164,7 @@ function conflictFor(thread: SourceThread, project: SourceProject, targetId: str
     reason: "Chat directory does not match a project root", owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), importedProjectId: existing?.projectId ?? null };
   const rootRoute = routeFor(root);
   const threadRoute = routeFor(thread.cwd);
-  if (foreignChat(project, thread, root, rootRoute, threadRoute)) return {
+  if (!fallbackChat(project, thread, root) && foreignChat(rootRoute, threadRoute)) return {
     sourceId: thread.id, title: thread.title, cwd: thread.cwd,
     reason: "Chat belongs to another Git repository; select its folder separately",
     owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), importedProjectId: existing?.projectId ?? null,
@@ -466,9 +469,12 @@ export default async function plugin(bb: BbPluginApi) {
           folders.set(route.key, { key: route.key, root, route, project, candidates: previous?.candidates ?? new Map() });
         }
       }
+      // Folders merge across source projects, so a fallback chat is remembered per chat.
+      const fallbackChats = new Set<string>();
       for (const project of selected) for (const thread of openedCatalog.threads(project)) {
         const root = rootForThread(project, thread, routeFor);
         if (!root) continue;
+        if (fallbackChat(project, thread, root)) fallbackChats.add(thread.id);
         const folder = folders.get(routeFor(root).key);
         if (folder) folder.candidates.set(thread.id, thread);
       }
@@ -497,12 +503,12 @@ export default async function plugin(bb: BbPluginApi) {
         updatedAt: new Date().toISOString(),
       };
       await updateStatus(progress);
-      for (const { root, route, project, candidates } of plans) {
+      for (const { root, route, candidates } of plans) {
         if (!route.exists || !route.targetPath) throw new Error(`Codex project path does not exist: ${root}`);
         const matching = existingTargets.filter((candidate) => candidate.sources.some((source) => source.hostId === hostId && routeFor(source.path).key === route.targetPath));
         if (matching.length > 1) throw new Error(`Several BB projects use ${route.targetPath}; choose one before migration`);
         for (const thread of candidates) {
-          if (foreignChat(project, thread, root, route, routeFor(thread.cwd))) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
+          if (!fallbackChats.has(thread.id) && foreignChat(route, routeFor(thread.cwd))) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
           const existing = activeStore.existing(thread.id);
           if (existing && existing.projectId !== matching[0]?.id) throw new Error(`Chat ${thread.id} is already in another BB project: ${existing.projectId}. Resolve this before import.`);
         }

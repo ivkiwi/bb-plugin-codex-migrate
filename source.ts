@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { join, dirname, delimiter, sep } from "node:path";
+import { basename, join, dirname, delimiter, sep } from "node:path";
 import Database from "better-sqlite3";
 
 // Codex desktop "Chats": threads without a project, imported as one synthetic project.
@@ -243,7 +243,9 @@ export class CodexCatalog {
     const chats = this.projectlessRows();
     if (chats.length === 0) return projects;
     // Chats inside an existing project's folder route to that project; the rest go to Codex's chat folder.
-    const owners = projects.flatMap((project) => project.roots).filter((root) => chats.some((row) => row.cwd === root || row.cwd.startsWith(root + sep)));
+    const owns = (root: string, cwd: string) => cwd === root || cwd.startsWith(root + sep) ||
+      (cwd.includes(`${sep}.codex${sep}worktrees${sep}`) && cwd.endsWith(sep + basename(root)));
+    const owners = projects.flatMap((project) => project.roots).filter((root) => chats.some((row) => owns(root, row.cwd)));
     return [...projects, { id: PROJECTLESS_ID, name: "Codex chats", roots: [join(homedir(), "Documents", "Codex"), ...new Set(owners)], createdAtMs: 0 }];
   }
 
