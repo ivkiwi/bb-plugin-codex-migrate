@@ -331,7 +331,8 @@ export default async function plugin(bb: BbPluginApi) {
         const existing = threads.map((thread) => store.existing(thread.id));
         const conflicts = includeThreads ? threads.map((thread) => {
           const root = rootForThread(project, thread, routeFor);
-          const matching = root ? matches(routeFor(thread.cwd).targetPath ?? routeFor(root).targetPath) : [];
+          // Same destination as apply: the chat's selected root decides the BB project.
+          const matching = root ? matches(routeFor(root).targetPath) : [];
           return conflictFor(thread, project, matching.length === 1 ? matching[0]!.id : null, catalog, store, allProjects, routeFor);
         }).filter((item) => item !== null) : [];
         const firstTarget = projectRoots[0] ? matches(routeFor(projectRoots[0]).targetPath) : [];
@@ -445,6 +446,13 @@ export default async function plugin(bb: BbPluginApi) {
       const allowedKeys = new Set(allProjects.flatMap((project) => project.roots.map((root) => routeFor(root).key)));
       for (const key of selectedKeys) if (!allowedKeys.has(key)) throw new Error(`Unknown Codex project folder: ${key}`);
       for (const key of gitInitRoots) if (!selectedKeys.has(key) || routeFor(key).kind !== "non-git") throw new Error(`Cannot initialize Git for unselected or Git-backed folder: ${key}`);
+      // git init in a plain folder would turn a selected plain subfolder into part of that repository after it was planned on its own.
+      const initKeys = [...selectedKeys].filter((key) => routeFor(key).kind === "non-git" && (options.initGitAll || gitInitRoots.includes(key)));
+      for (const key of selectedKeys) {
+        if (routeFor(key).kind !== "non-git" || initKeys.includes(key)) continue;
+        const absorbing = initKeys.find((root) => root !== key && inside(key, root));
+        if (absorbing) throw new Error(`Initializing Git in ${absorbing} would absorb the selected folder ${key}; initialize Git there too or deselect it`);
+      }
       const activeStore = new BbStore(dataDir, true);
       store = activeStore;
       const folders = new Map<string, { key: string; root: string; route: FolderRoute; project: SourceProject; candidates: Map<string, SourceThread> }>();

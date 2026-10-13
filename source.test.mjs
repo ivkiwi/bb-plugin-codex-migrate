@@ -198,18 +198,21 @@ test("lists Codex desktop chats without a project as one synthetic project", asy
         created_at INTEGER,updated_at INTEGER,model TEXT,reasoning_effort TEXT,source TEXT)`);
     db.prepare("INSERT INTO projects VALUES(?,?,?,?)").run("divoom", "Divoom", 0, 1);
     db.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("divoom", 0, "/work/Divoom");
+    db.prepare("INSERT INTO projects VALUES(?,?,?,?)").run("exact", "Exact", 1, 1);
+    db.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("exact", 0, "/work/Exact");
     const insert = db.prepare("INSERT INTO threads VALUES(?,?,?,?,?,0,NULL,1000,2000,1,2,NULL,NULL,'vscode')");
     insert.run("chat", null, "Chat", null, join(homedir(), "Documents", "Codex", "2026-06-03", "x"));
     insert.run("nested", null, "Nested", null, "/work/Divoom/timesgate");
     insert.run("observer", null, "Observer", null, join(homedir(), ".claude-mem", "observer-sessions"));
     insert.run("unlisted", null, "Unlisted", null, "/elsewhere");
+    insert.run("at-root", null, "At root", null, "/work/Exact");
     insert.run("owned", "divoom", "Owned", null, "/work/Divoom");
     db.close();
-    writeFileSync(join(directory, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["chat", "nested", "observer", "owned"] }));
+    writeFileSync(join(directory, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["chat", "nested", "observer", "owned", "at-root"] }));
     const catalog = new CodexCatalog(directory);
     const chats = catalog.projects().find((project) => project.id === PROJECTLESS_ID);
-    assert.deepEqual(chats.roots, [join(homedir(), "Documents", "Codex"), "/work/Divoom"]);
-    assert.deepEqual(catalog.threads(chats).map((thread) => thread.id), ["chat", "nested"]);
+    assert.deepEqual(chats.roots, [join(homedir(), "Documents", "Codex"), "/work/Divoom", "/work/Exact"]);
+    assert.deepEqual(catalog.threads(chats).map((thread) => thread.id), ["chat", "nested", "at-root"]);
     catalog.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });

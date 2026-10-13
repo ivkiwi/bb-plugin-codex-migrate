@@ -242,7 +242,7 @@ export class CodexCatalog {
     const chats = this.projectlessRows();
     if (chats.length === 0) return projects;
     // Chats inside an existing project's folder route to that project; the rest go to Codex's chat folder.
-    const owners = projects.flatMap((project) => project.roots).filter((root) => chats.some((row) => row.cwd.startsWith(root + sep)));
+    const owners = projects.flatMap((project) => project.roots).filter((root) => chats.some((row) => row.cwd === root || row.cwd.startsWith(root + sep)));
     return [...projects, { id: PROJECTLESS_ID, name: "Codex chats", roots: [join(homedir(), "Documents", "Codex"), ...new Set(owners)], createdAtMs: 0 }];
   }
 
