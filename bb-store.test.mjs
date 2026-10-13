@@ -137,7 +137,7 @@ test("repair turns Codex directives in imported messages into Markdown", () => {
     store.db.prepare("INSERT INTO events(id,thread_id,environment_id,scope_kind,turn_id,provider_thread_id,sequence,type,item_id,item_kind,data,created_at) VALUES('evt_m1',?,NULL,'turn','t1','codex_thread',9,'item/completed','m1','agentMessage',?,120)").run(threadId, data);
     store.db.prepare("INSERT INTO thread_search_segments VALUES(?,?,'assistant_message','event:9',9,'raw',120,120)").run(`${threadId}:assistant_message:event:9`, threadId);
     assert.equal(store.repairImportedThread({ ...source, fallbackTitle: source.title }, "original", 80).events, 1);
-    assert.equal(JSON.parse(store.db.prepare("SELECT data FROM events WHERE id='evt_m1'").get().data).item.text, "[report.xlsx](</tmp/report.xlsx>)");
-    assert.equal(store.db.prepare("SELECT text FROM thread_search_segments WHERE source_key='event:9'").get().text, "[report.xlsx](</tmp/report.xlsx>)");
+    assert.equal(JSON.parse(store.db.prepare("SELECT data FROM events WHERE id='evt_m1'").get().data).item.text, "📊 [report.xlsx](</tmp/report.xlsx>)");
+    assert.equal(store.db.prepare("SELECT text FROM thread_search_segments WHERE source_key='event:9'").get().text, "📊 [report.xlsx](</tmp/report.xlsx>)");
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
 });

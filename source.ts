@@ -8,6 +8,11 @@ import Database from "better-sqlite3";
 // Codex desktop "Chats": threads without a project, imported as one synthetic project.
 export const PROJECTLESS_ID = "codex:projectless";
 
+function ownsChat(root: string, cwd: string): boolean {
+  return cwd === root || cwd.startsWith(root + sep) ||
+    (cwd.includes(`${sep}.codex${sep}worktrees${sep}`) && cwd.endsWith(sep + basename(root)));
+}
+
 export interface SourceProject {
   id: string;
   name: string;
@@ -231,22 +236,33 @@ export class CodexCatalog {
     return true;
   }
 
-  projects(): SourceProject[] {
+  private regularProjects(): SourceProject[] {
     const rows = this.db.prepare("SELECT id,name,created_at_ms FROM projects ORDER BY position,name").all() as ProjectRow[];
     const roots = this.db.prepare("SELECT path FROM project_roots WHERE project_id=? ORDER BY position");
-    const projects = rows.map((row) => ({
+    return rows.map((row) => ({
       id: row.id,
       name: row.name,
       roots: (roots.all(row.id) as { path: string }[]).map((root) => root.path),
       createdAtMs: row.created_at_ms,
     }));
-    const chats = this.projectlessRows();
-    if (chats.length === 0) return projects;
-    // Chats inside an existing project's folder route to that project; the rest go to Codex's chat folder.
-    const owns = (root: string, cwd: string) => cwd === root || cwd.startsWith(root + sep) ||
-      (cwd.includes(`${sep}.codex${sep}worktrees${sep}`) && cwd.endsWith(sep + basename(root)));
-    const owners = projects.flatMap((project) => project.roots).filter((root) => chats.some((row) => owns(root, row.cwd)));
-    return [...projects, { id: PROJECTLESS_ID, name: "Codex chats", roots: [join(homedir(), "Documents", "Codex"), ...new Set(owners)], createdAtMs: 0 }];
+  }
+
+  /** Each Codex chat without a project, with the deepest project folder that contains it, if any. */
+  private projectlessOwners(projects?: SourceProject[]): { row: ThreadRow; owner: string | null }[] {
+    const rows = this.projectlessRows();
+    if (rows.length === 0) return [];
+    const roots = (projects ?? this.regularProjects()).flatMap((project) => project.roots);
+    return rows.map((row) => ({
+      row,
+      owner: roots.filter((root) => ownsChat(root, row.cwd)).sort((a, b) => b.length - a.length)[0] ?? null,
+    }));
+  }
+
+  projects(): SourceProject[] {
+    const projects = this.regularProjects();
+    // Chats inside a project folder join that project; the rest form "Codex chats" in Codex's chat folder.
+    if (!this.projectlessOwners(projects).some(({ owner }) => owner === null)) return projects;
+    return [...projects, { id: PROJECTLESS_ID, name: "Codex chats", roots: [join(homedir(), "Documents", "Codex")], createdAtMs: 0 }];
   }
 
   private projectlessRows(): ThreadRow[] {
@@ -267,8 +283,10 @@ export class CodexCatalog {
     const byProject = this.db.prepare("SELECT * FROM threads WHERE project_id=?");
     const byRoot = this.db.prepare("SELECT * FROM threads WHERE cwd=?");
     const byWorktree = this.db.prepare("SELECT * FROM threads WHERE cwd LIKE ? ESCAPE '\\'");
-    if (project.id === PROJECTLESS_ID) for (const row of this.projectlessRows()) all.set(row.id, row);
-    else for (const row of byProject.all(project.id) as ThreadRow[]) all.set(row.id, row);
+    for (const { row, owner } of this.projectlessOwners()) {
+      if (project.id === PROJECTLESS_ID ? owner === null : owner !== null && project.roots.includes(owner)) all.set(row.id, row);
+    }
+    if (project.id !== PROJECTLESS_ID) for (const row of byProject.all(project.id) as ThreadRow[]) all.set(row.id, row);
     if (project.id !== PROJECTLESS_ID) for (const root of project.roots) {
       for (const row of byRoot.all(root) as ThreadRow[]) all.set(row.id, row);
       const basename = root.split(/[\\/]/).filter(Boolean).at(-1);

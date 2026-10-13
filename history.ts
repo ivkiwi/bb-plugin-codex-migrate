@@ -85,6 +85,7 @@ function normalizeUserContent(value: unknown): { parts: Record<string, unknown>[
 }
 
 // Codex desktop renders these directives as cards; BB shows them as raw text, so they become Markdown.
+const CODE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/;
 const DIRECTIVE = /(::?)([a-z][a-z0-9-]*)\{((?:"(?:[^"\\]|\\.)*"|[^}"])*)\}/g;
 const ATTRIBUTE = /([A-Za-z][\w-]*)=(?:"((?:[^"\\]|\\.)*)"|([^\s}]+))/g;
 
@@ -92,17 +93,30 @@ function folder(path: string | undefined): string {
   return `\`${path?.split(/[\\/]/).filter(Boolean).at(-1) ?? "repository"}\``;
 }
 
+function fileIcon(name: string): string {
+  const extension = name.split(".").at(-1)?.toLowerCase() ?? "";
+  if (["xlsx", "xls", "csv", "tsv", "numbers"].includes(extension)) return "📊";
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "heic"].includes(extension)) return "🖼️";
+  return "📄";
+}
+
 function quote(text: string): string {
   return text.split("\n").map((line) => `> ${line}`).join("\n");
 }
 
+/** Code blocks and inline code keep directives as written: they are examples, not output. */
 export function renderCodexDirectives(text: string): string {
+  return text.split(CODE).map((part, index) => index % 2 === 1 ? part : renderDirectives(part)).join("");
+}
+
+function renderDirectives(text: string): string {
   return text.replace(DIRECTIVE, (source, colons: string, name: string, body: string) => {
     const a: Record<string, string> = {};
     for (const match of body.matchAll(ATTRIBUTE)) a[match[1]!] = match[2] !== undefined ? match[2].replace(/\\(.)/g, "$1") : match[3]!;
     if (colons === ":") {
       if (name !== "codex-file-citation" || !a.path) return source;
-      return `[${a.path.split(/[\\/]/).at(-1)}](<${a.path}>)`;
+      const fileName = a.path.split(/[\\/]/).at(-1) ?? a.path;
+      return `${fileIcon(fileName)} [${fileName}](<${a.path}>)`;
     }
     switch (name) {
       case "git-stage": return `_Staged changes in ${folder(a.cwd)}_`;

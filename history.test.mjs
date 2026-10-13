@@ -28,7 +28,7 @@ test("last activity comes from real turn times only", () => {
 });
 
 test("Codex directives become Markdown and unknown ones stay as written", () => {
-  assert.equal(renderCodexDirectives('See :codex-file-citation{path="/tmp/out/Отчёт 1.xlsx" purpose="output"}.'), "See [Отчёт 1.xlsx](</tmp/out/Отчёт 1.xlsx>).");
+  assert.equal(renderCodexDirectives('See :codex-file-citation{path="/tmp/out/Отчёт 1.xlsx" purpose="output"}.'), "See 📊 [Отчёт 1.xlsx](</tmp/out/Отчёт 1.xlsx>).");
   assert.equal(renderCodexDirectives('::git-push{cwd="/work/muesli" branch="fix"}'), "_Pushed `fix` from `muesli`_");
   assert.equal(renderCodexDirectives('::git-create-pr{cwd="/w/r" branch="b" url="https://x/pull/1" isDraft=false}'), "_Opened pull request:_ https://x/pull/1");
   assert.equal(renderCodexDirectives('::inbox-item{title="Done" summary="Sent \\"it\\""}'), '**Done** — Sent "it"');
@@ -37,5 +37,9 @@ test("Codex directives become Markdown and unknown ones stay as written", () => 
     "> **[P1] Bug**\n> \n> Line one\n> line two\n> \n> `/w/a.php:27-28`",
   );
   assert.equal(renderCodexDirectives('::created-thread{clientThreadId="client-new-thread:1"}'), "_Started a new thread_");
+  assert.equal(
+    renderCodexDirectives('Run `::git-push{cwd="/a"}` or\n```\n::git-stage{cwd="/a"}\n```\n::git-stage{cwd="/w/b"}'),
+    'Run `::git-push{cwd="/a"}` or\n```\n::git-stage{cwd="/a"}\n```\n_Staged changes in `b`_',
+  );
   for (const raw of ["::future-card{x=1}", "a:hover{color:red}", "User::canEdit()"]) assert.equal(renderCodexDirectives(raw), raw);
 });

@@ -327,6 +327,14 @@ export default async function plugin(bb: BbPluginApi) {
       const targets = await bb.sdk.projects.list();
       const hostId = (await bb.sdk.system.config()).primaryHostId;
       const matches = (path: string | null) => path === null ? [] : targets.filter((candidate) => candidate.sources.some((source) => source.hostId === hostId && routeFor(source.path).key === path));
+      // A folder can come from several Codex projects; count each chat in it once across all of them.
+      const chatsByFolder = new Map<string, Set<string>>();
+      for (const project of selected) for (const thread of catalog.threads(project)) {
+        const root = rootForThread(project, thread, routeFor);
+        if (!root) continue;
+        const key = routeFor(root).key;
+        chatsByFolder.set(key, (chatsByFolder.get(key) ?? new Set()).add(thread.id));
+      }
       return selected.map((project) => {
         const projectRoots = selectedKeys ? project.roots.filter((root) => selectedKeys.has(routeFor(root).key)) : project.roots;
         const threads = catalog.threads(project).filter((thread) => {
@@ -350,7 +358,7 @@ export default async function plugin(bb: BbPluginApi) {
             const route = routeFor(path);
             const matching = matches(route.targetPath);
             return { path, key: route.key, kind: route.kind, exists: route.exists, git: route.git, targetPath: route.targetPath,
-              candidates: threads.filter((thread) => rootForThread(project, thread, routeFor) === path).length,
+              candidates: chatsByFolder.get(route.key)?.size ?? 0,
               targetProjectId: matching.length === 1 ? matching[0]!.id : null,
               targetProjectName: matching.length > 1 ? "Ambiguous BB projects" : matching[0]?.name ?? suggestedName(allProjects, route, routeFor),
               linkedProjects: [...new Set(allProjects.filter((item) => item.roots.some((root) => routeFor(root).key === route.key)).map((item) => item.name))] };

@@ -213,9 +213,14 @@ test("lists Codex desktop chats without a project as one synthetic project", asy
     db.close();
     writeFileSync(join(directory, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["chat", "nested", "observer", "owned", "at-root", "worktree"] }));
     const catalog = new CodexCatalog(directory);
-    const chats = catalog.projects().find((project) => project.id === PROJECTLESS_ID);
-    assert.deepEqual(chats.roots, [join(homedir(), "Documents", "Codex"), "/work/Divoom", "/work/Exact", "/work/Repo"]);
-    assert.deepEqual(catalog.threads(chats).map((thread) => thread.id), ["chat", "nested", "at-root", "worktree"]);
+    const projects = catalog.projects();
+    const chats = projects.find((project) => project.id === PROJECTLESS_ID);
+    const threadsOf = (id) => catalog.threads(projects.find((project) => project.id === id)).map((thread) => thread.id);
+    assert.deepEqual(chats.roots, [join(homedir(), "Documents", "Codex")]);
+    assert.deepEqual(threadsOf(PROJECTLESS_ID), ["chat"]);
+    assert.deepEqual(threadsOf("divoom"), ["nested", "owned"]);
+    assert.deepEqual(threadsOf("exact"), ["at-root"]);
+    assert.deepEqual(threadsOf("repo"), ["worktree"]);
     catalog.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -236,6 +241,29 @@ test("dates activity by Codex recency, not by metadata updates", () => {
     const catalog = new CodexCatalog(directory);
     const [thread] = catalog.threads({ id: "project", name: "Project", roots: [directory], createdAtMs: 0 });
     assert.equal(thread.updatedAtMs, 3000);
+    catalog.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("no Codex chats project when every chat without a project sits in a project folder", async () => {
+  const { PROJECTLESS_ID } = await import("./.tmp-test/source.js");
+  const directory = mkdtempSync(join(tmpdir(), "bb-codex-owned-"));
+  const db = new Database(join(directory, "state_5.sqlite"));
+  try {
+    db.exec(`CREATE TABLE projects(id TEXT,name TEXT,position INTEGER,created_at_ms INTEGER);
+      CREATE TABLE project_roots(project_id TEXT,position INTEGER,path TEXT);
+      CREATE TABLE threads(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,name TEXT,cwd TEXT,
+        archived INTEGER,archived_at INTEGER,created_at_ms INTEGER,updated_at_ms INTEGER,
+        created_at INTEGER,updated_at INTEGER,model TEXT,reasoning_effort TEXT,source TEXT)`);
+    db.prepare("INSERT INTO projects VALUES(?,?,?,?)").run("work", "Work", 0, 1);
+    db.prepare("INSERT INTO project_roots VALUES(?,?,?)").run("work", 0, "/work");
+    db.prepare("INSERT INTO threads VALUES('inside',NULL,'Inside',NULL,'/work/sub',0,NULL,1000,2000,1,2,NULL,NULL,'vscode')").run();
+    db.close();
+    writeFileSync(join(directory, ".codex-global-state.json"), JSON.stringify({ "projectless-thread-ids": ["inside"] }));
+    const catalog = new CodexCatalog(directory);
+    assert.equal(catalog.projects().some((project) => project.id === PROJECTLESS_ID), false);
     catalog.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
