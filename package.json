@@ -10,7 +10,7 @@
     "test": "tsc -p tsconfig.test-build.json && node --test bb-store.test.mjs history.test.mjs routing.test.mjs server.test.mjs source.test.mjs"
   },
   "engines": {
-    "bb": ">=0.44 <0.45",
+    "bb": ">=0.44 <0.47",
     "bbPluginSdk": ">=0.5.29"
   },
   "bb": {
