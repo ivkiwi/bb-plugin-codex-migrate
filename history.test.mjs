@@ -45,7 +45,10 @@ test("Codex directives become Markdown and unknown ones stay as written", () => 
     'See ``::git-stage{cwd="/w/r"}`` here',
     '````md\n```\n::git-stage{cwd="/w/r"}\n```\n````',
     'Open fence\n```\n::git-stage{cwd="/w/r"}',
+    '> ~~~md\n> ::git-stage{cwd="/repo"}\n> ~~~',
+    '- item\n\n  ```\n  ::git-stage{cwd="/repo"}\n  ```',
   ]) assert.equal(renderCodexDirectives(kept), kept);
+  assert.equal(renderCodexDirectives('```example``` ::git-stage{cwd="/repo"}'), "```example``` _Staged changes in `repo`_");
   assert.equal(renderCodexDirectives('A ` alone, then ::git-commit{cwd="/w/r"}'), "A ` alone, then _Committed in `r`_");
   assert.equal(
     renderCodexDirectives('::code-comment{title="Check" body="Read `value` first"}'),

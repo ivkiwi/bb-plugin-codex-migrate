@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { fromMarkdown } from "mdast-util-from-markdown";
 import { z } from "zod";
 import type { SourceThread } from "./source.js";
 
@@ -85,8 +86,6 @@ function normalizeUserContent(value: unknown): { parts: Record<string, unknown>[
 }
 
 // Codex desktop renders these directives as cards; BB shows them as raw text, so they become Markdown.
-const FENCE = / {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)/y;
-const TICKS = /`+/y;
 const DIRECTIVE = /(::?)([a-z][a-z0-9-]*)\{((?:"(?:[^"\\]|\\.)*"|[^}"])*)\}/y;
 const ATTRIBUTE = /([A-Za-z][\w-]*)=(?:"((?:[^"\\]|\\.)*)"|([^\s}]+))/g;
 
@@ -105,43 +104,32 @@ function quote(text: string): string {
   return text.split("\n").map((line) => `> ${line}`).join("\n");
 }
 
-/** End of a code span opened by `width` backticks: the next run of exactly that width, or -1. */
-function closingTicks(text: string, from: number, width: number): number {
-  for (let index = text.indexOf("`", from); index !== -1; index = text.indexOf("`", index)) {
-    TICKS.lastIndex = index;
-    const run = TICKS.exec(text)![0].length;
-    if (run === width) return index + run;
-    index += run;
-  }
-  return -1;
+/** Offsets of code blocks and code spans, as a CommonMark parser sees them (quotes and lists included). */
+function codeRanges(text: string): [number, number][] {
+  const ranges: [number, number][] = [];
+  const walk = (node: { type: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: unknown[] }) => {
+    if ((node.type === "code" || node.type === "inlineCode") && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
+      ranges.push([node.position.start.offset, node.position.end.offset]);
+    } else for (const child of node.children ?? []) walk(child as Parameters<typeof walk>[0]);
+  };
+  walk(fromMarkdown(text));
+  return ranges;
 }
 
-/** Scans Markdown the way CommonMark delimits code: fenced blocks and code spans keep directives as
- * written, since they are examples; a directive met outside code is consumed whole, quotes included. */
+/** Code keeps directives as written, since it holds examples; a directive that starts outside code is
+ * consumed whole, so backticks inside its quoted attributes do not split it. */
 export function renderCodexDirectives(text: string): string {
+  if (!text.includes("{")) return text;
+  const ranges = codeRanges(text);
   let output = "";
   let index = 0;
+  let range = 0;
   while (index < text.length) {
-    if (index === 0 || text[index - 1] === "\n") {
-      FENCE.lastIndex = index;
-      const open = FENCE.exec(text);
-      if (open) {
-        const marker = open[1]!;
-        const close = new RegExp(`^ {0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}[ \\t]*$`, "m");
-        const after = index + open[0].length;
-        const match = close.exec(text.slice(after));
-        const end = match ? after + match.index + match[0].length : text.length;
-        output += text.slice(index, end);
-        index = end;
-        continue;
-      }
-    }
-    if (text[index] === "`") {
-      TICKS.lastIndex = index;
-      const width = TICKS.exec(text)![0].length;
-      const end = closingTicks(text, index + width, width);
-      output += text.slice(index, end === -1 ? index + width : end);
-      index = end === -1 ? index + width : end;
+    while (range < ranges.length && ranges[range]![1] <= index) range += 1;
+    const code = ranges[range];
+    if (code && code[0] <= index) {
+      output += text.slice(index, code[1]);
+      index = code[1];
       continue;
     }
     if (text[index] === ":") {
@@ -153,8 +141,9 @@ export function renderCodexDirectives(text: string): string {
         continue;
       }
     }
-    output += text[index];
-    index += 1;
+    const next = Math.min(code ? code[0] : text.length, text.indexOf(":", index + 1) === -1 ? text.length : text.indexOf(":", index + 1));
+    output += text.slice(index, next);
+    index = next;
   }
   return output;
 }
