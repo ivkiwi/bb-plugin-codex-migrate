@@ -29,7 +29,7 @@ function CodexMigrationPage() {
         setProjects(result.projects);
         const roots = [...new Map(result.projects.flatMap((project) => project.rootDetails.map((root) => [root.key, root]))).values()];
         setSelectedRoots(roots.map((root) => root.key));
-        setGitInitRoots(roots.filter((root) => root.kind === "non-git").map((root) => root.key));
+        setGitInitRoots([]);
       })
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
   }, [rpc, refreshStatus]);
@@ -76,7 +76,7 @@ function CodexMigrationPage() {
 
   const uniqueRoots = [...new Map(preview?.flatMap((project) => project.rootDetails.map((root) => [root.key, root])) ?? []).values()];
   const unresolvedConflicts = [...new Map(preview?.flatMap((project) => project.conflicts.map((conflict) => [conflict.sourceId, conflict])) ?? []).values()];
-  const eligibleRoots = uniqueRoots.filter((root) => root.kind !== "missing" && (root.kind !== "non-git" || gitInitRoots.includes(root.key)));
+  const eligibleRoots = uniqueRoots.filter((root) => root.kind !== "missing");
   const startImport = async () => {
     if (selectedRoots.length === 0 || preview === null || eligibleRoots.length === 0 || starting || current?.state === "running" || unresolvedConflicts.length > 0) return;
     setStarting(true);
@@ -157,12 +157,11 @@ function CodexMigrationPage() {
             {root.kind === "worktree" && <p className="mt-2 text-sm">Chats from this worktree will go to the main repository project at {root.targetPath}.</p>}
             {root.kind === "missing" && <p className="mt-2 text-sm text-destructive">The folder is missing. Deselect it before importing.</p>}
             {root.kind === "non-git" && <div className="mt-3 rounded border border-border p-3 text-sm">
-              <p>Warning: this folder is not in a Git repository. Import will run git init here without creating a commit or remote.</p>
+              <p>This folder is not in a Git repository. It is imported as a plain folder.</p>
               <label className="mt-2 flex items-center gap-2">
                 <Checkbox checked={gitInitRoots.includes(root.key)} onCheckedChange={(checked) => setGitInitRoots((current) => checked === true ? [...new Set([...current, root.key])] : current.filter((key) => key !== root.key))} aria-label={`Initialize Git in ${root.path}`} />
-                <span>Initialize Git and import this folder</span>
+                <span>Also run git init here (no commit or remote)</span>
               </label>
-              {!gitInitRoots.includes(root.key) && <p className="mt-2 text-muted-foreground">This folder will be skipped.</p>}
             </div>}
           </section>)}
           {unresolvedConflicts.length > 0 && <div className="rounded border border-destructive p-3 text-xs text-destructive">

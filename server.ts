@@ -465,8 +465,8 @@ export default async function plugin(bb: BbPluginApi) {
           return !options.existingOnly || activeStore.existing(thread.id) !== null;
         });
         return { ...folder, candidates };
-      }).filter((folder) => folder.route.kind !== "non-git" || options.initGitAll || gitInitRoots.includes(folder.key));
-      if (plans.length === 0) throw new Error("No importable folders selected. For a standalone folder without Git, enable git init.");
+      });
+      if (plans.length === 0) throw new Error("No importable folders selected.");
       const hostId = (await bb.sdk.system.config()).primaryHostId;
       if (hostId === null) throw new Error("BB has no primary host");
       const existingTargets = await bb.sdk.projects.list();
@@ -488,12 +488,14 @@ export default async function plugin(bb: BbPluginApi) {
         if (matching.length > 1) throw new Error(`Several BB projects use ${route.targetPath}; choose one before migration`);
         for (const thread of candidates) {
           const threadRoute = routeFor(thread.cwd);
-          if (threadRoute.exists && threadRoute.targetPath !== route.targetPath) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
+          // A plain folder owns its plain subfolders, as in Codex; only a nested Git repository is foreign.
+          const plainSubfolder = route.kind === "non-git" && threadRoute.kind === "non-git";
+          if (threadRoute.exists && threadRoute.targetPath !== route.targetPath && !plainSubfolder) throw new Error(`Chat ${thread.id} belongs to another Git repository: ${thread.cwd}`);
           const existing = activeStore.existing(thread.id);
           if (existing && existing.projectId !== matching[0]?.id) throw new Error(`Chat ${thread.id} is already in another BB project: ${existing.projectId}. Resolve this before import.`);
         }
       }
-      for (const { route } of plans) if (route.kind === "non-git") {
+      for (const { key, route } of plans) if (route.kind === "non-git" && (options.initGitAll || gitInitRoots.includes(key))) {
         execFileSync("git", ["-C", route.key, "init"], { stdio: "pipe" });
       }
       const { titleMode, titleMaxLength } = await titleSettings.get();
