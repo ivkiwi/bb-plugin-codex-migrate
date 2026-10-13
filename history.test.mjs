@@ -41,5 +41,15 @@ test("Codex directives become Markdown and unknown ones stay as written", () => 
     renderCodexDirectives('Run `::git-push{cwd="/a"}` or\n```\n::git-stage{cwd="/a"}\n```\n::git-stage{cwd="/w/b"}'),
     'Run `::git-push{cwd="/a"}` or\n```\n::git-stage{cwd="/a"}\n```\n_Staged changes in `b`_',
   );
+  for (const kept of [
+    'See ``::git-stage{cwd="/w/r"}`` here',
+    '````md\n```\n::git-stage{cwd="/w/r"}\n```\n````',
+    'Open fence\n```\n::git-stage{cwd="/w/r"}',
+  ]) assert.equal(renderCodexDirectives(kept), kept);
+  assert.equal(renderCodexDirectives('A ` alone, then ::git-commit{cwd="/w/r"}'), "A ` alone, then _Committed in `r`_");
+  assert.equal(
+    renderCodexDirectives('::code-comment{title="Check" body="Read `value` first"}'),
+    "> **Check**\n> \n> Read `value` first",
+  );
   for (const raw of ["::future-card{x=1}", "a:hover{color:red}", "User::canEdit()"]) assert.equal(renderCodexDirectives(raw), raw);
 });
