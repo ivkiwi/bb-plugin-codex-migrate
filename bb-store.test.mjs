@@ -42,6 +42,7 @@ test("import preserves identity, archive state, attachment ownership and idempot
     const threadId = store.importThread(args);
     assert.deepEqual(store.existing(source.id), { threadId, projectId: "proj_test", archived: true, userMessages: 1, assistantMessages: 0 });
     assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM project_attachment_threads WHERE thread_id=?").get(threadId).n, 1);
+    assert.deepEqual({ ...store.db.prepare("SELECT latest_attention_at AS attention, updated_at AS updated FROM threads WHERE id=?").get(threadId) }, { attention: 110, updated: 110 });
     assert.throws(() => store.importThread(args), /already imported/);
     assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM threads").get().n, 1);
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }

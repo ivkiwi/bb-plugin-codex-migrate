@@ -218,3 +218,23 @@ test("lists Codex desktop chats without a project as one synthetic project", asy
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("dates activity by Codex recency, not by metadata updates", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bb-codex-recency-"));
+  const db = new Database(join(directory, "state_5.sqlite"));
+  try {
+    db.exec(`CREATE TABLE projects(id TEXT);
+      CREATE TABLE project_roots(path TEXT);
+      CREATE TABLE threads(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,name TEXT,cwd TEXT,
+        archived INTEGER,archived_at INTEGER,created_at_ms INTEGER,updated_at_ms INTEGER,recency_at_ms INTEGER,
+        created_at INTEGER,updated_at INTEGER,model TEXT,reasoning_effort TEXT,source TEXT)`);
+    db.prepare("INSERT INTO threads VALUES(?,?,?,?,?,0,NULL,1000,9000,3000,1,9,NULL,NULL,'vscode')").run("touched", "project", "Touched", null, directory);
+    db.close();
+    const catalog = new CodexCatalog(directory);
+    const [thread] = catalog.threads({ id: "project", name: "Project", roots: [directory], createdAtMs: 0 });
+    assert.equal(thread.updatedAtMs, 3000);
+    catalog.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

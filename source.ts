@@ -46,6 +46,7 @@ interface ThreadRow {
   archived_at: number | null;
   created_at_ms: number | null;
   updated_at_ms: number | null;
+  recency_at_ms?: number | null;
   created_at: number;
   updated_at: number;
   model: string | null;
@@ -286,7 +287,8 @@ export class CodexCatalog {
         archived: row.archived === 1,
         archivedAt: row.archived_at === null ? null : row.archived_at * 1000,
         createdAtMs: row.created_at_ms ?? row.created_at * 1000,
-        updatedAtMs: row.updated_at_ms ?? row.updated_at * 1000,
+        // Codex bumps updated_at for metadata writes (automations, renames); recency_at is the last real activity.
+        updatedAtMs: row.recency_at_ms ?? row.updated_at_ms ?? row.updated_at * 1000,
         model: row.model,
         reasoningEffort: row.reasoning_effort,
         source: row.source,

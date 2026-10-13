@@ -95,6 +95,8 @@ export class BbStore {
     const environmentPath = insideProject ? args.projectRoot : existsSync(sourcePath) ? sourcePath : isWorktreePath ? args.projectRoot : sourcePath;
     if (!existsSync(environmentPath)) throw new Error(`Project path does not exist: ${environmentPath}`);
     const now = Date.now();
+    // Activity follows the last imported message, not Codex metadata writes.
+    const lastActivity = args.history.events.reduce((latest, event) => Math.max(latest, event.createdAt), 0) || args.source.updatedAtMs;
     const write = this.db.transaction(() => {
       let environmentId = (this.db.prepare(
         "SELECT id FROM environments WHERE project_id=? AND host_id=? AND path=? AND status='ready' ORDER BY created_at LIMIT 1",
@@ -118,8 +120,8 @@ export class BbStore {
       `).run(threadId, args.projectId, environmentId, "codex", "idle",
         formatTitle(args.source.title, args.titleMode ?? "truncate", args.titleMaxLength ?? 80) || null,
         args.source.archived ? (args.source.archivedAt ?? args.source.updatedAtMs) : null,
-        args.source.updatedAtMs, args.source.updatedAtMs,
-        args.source.createdAtMs, args.source.updatedAtMs, "visible");
+        lastActivity, lastActivity,
+        args.source.createdAtMs, lastActivity, "visible");
       const insertEvent = this.db.prepare(`
         INSERT INTO events(id,thread_id,environment_id,scope_kind,turn_id,provider_thread_id,
           sequence,type,item_id,item_kind,data,created_at,parent_tool_call_id)
